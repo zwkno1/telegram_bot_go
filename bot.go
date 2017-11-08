@@ -1,41 +1,41 @@
 package main
 
 import (
-	"github.com/go-telegram-bot-api/telegram-bot-api"
+	"encoding/json"
+	"flag"
 	"github.com/garyburd/redigo/redis"
+	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/zwkno1/gojieba"
+	"io/ioutil"
 	"log"
 	"net/http"
-	"time"
-	"strconv"
-	"io/ioutil"
 	"os"
-	"encoding/json"
+	"strconv"
 	"strings"
-	"flag"
+	"time"
 )
 
 const (
 	defaultMessage string = "Oops!"
 )
 
-type BotConfig struct{
-	Name string
-	Token string
-	Url string
+type BotConfig struct {
+	Name    string
+	Token   string
+	Url     string
 	Address string
-	Cert string
-	Key string
+	Cert    string
+	Key     string
 }
 
-func SplitText(text string)([] string) {
+func SplitText(text string) []string {
 	var result []string
 	words := jieba.Tag(text)
-	allow := []string {"/n", "/nr", "/ns", "/nt", "/nz", "/eng", "/user"}
+	allow := []string{"/n", "/nr", "/ns", "/nt", "/nz", "/eng", "/user"}
 	for _, word := range words {
 		for _, suffix := range allow {
-			if(strings.HasSuffix(word, suffix)) {
-				word = word[:len(word) - len(suffix)]
+			if strings.HasSuffix(word, suffix) {
+				word = word[:len(word)-len(suffix)]
 				if len(word) > 1 {
 					result = append(result, word)
 				}
@@ -50,12 +50,12 @@ func SplitText(text string)([] string) {
 	return result
 }
 
-func GetChatId(message * tgbotapi.Message) (string) {
+func GetChatId(message *tgbotapi.Message) string {
 	chatId := strconv.FormatInt(message.Chat.ID, 10)
 	return message.Chat.Type + chatId
 }
 
-func MessageToString(message * tgbotapi.Message) (msg string) {
+func MessageToString(message *tgbotapi.Message) (msg string) {
 	jsonMessage, err := json.Marshal(*message)
 	if err != nil {
 		log.Printf("message marshal error: %+v\n", err.Error())
@@ -66,8 +66,8 @@ func MessageToString(message * tgbotapi.Message) (msg string) {
 	return msg
 }
 
-func DefaultMessageHandler(message * tgbotapi.Message){
-	log.Printf("(text) %+v>> \t%+v\n", message.From.FirstName + " " + message.From.LastName, message.Text)
+func DefaultMessageHandler(message *tgbotapi.Message) {
+	log.Printf("(text) %+v>> \t%+v\n", message.From.FirstName+" "+message.From.LastName, message.Text)
 	from := message.From
 	if (from != nil) && (message.Chat != nil) {
 		userId := strconv.Itoa(from.ID)
@@ -75,7 +75,7 @@ func DefaultMessageHandler(message * tgbotapi.Message){
 		chatId := GetChatId(message)
 		msg := MessageToString(message)
 		words := SplitText(message.Text)
-		args := make([]interface{}, len(words)+ 4)
+		args := make([]interface{}, len(words)+4)
 		args[0] = chatId
 		args[1] = userId
 		args[2] = msg
@@ -95,13 +95,13 @@ func DefaultMessageHandler(message * tgbotapi.Message){
 	}
 }
 
-func RankHandler(message * tgbotapi.Message){
-	log.Printf("(/rank) %+v>> \t%+v\n", message.From.FirstName + " " + message.From.LastName, message.Text)
+func RankHandler(message *tgbotapi.Message) {
+	log.Printf("(/rank) %+v>> \t%+v\n", message.From.FirstName+" "+message.From.LastName, message.Text)
 	chatId := GetChatId(message)
 	reply, err := redis.Strings(rankScript.Do(redisClient, chatId))
 	var text string
 	if err == nil {
-		for i := 0; i < len(reply) - 1; i += 2 {
+		for i := 0; i < len(reply)-1; i += 2 {
 			text += reply[i] + " : " + reply[i+1] + "\n"
 		}
 	} else {
@@ -117,12 +117,12 @@ func RankHandler(message * tgbotapi.Message){
 	bot.Send(msg)
 }
 
-func TextRankHandler(message * tgbotapi.Message) {
+func TextRankHandler(message *tgbotapi.Message) {
 	key := "textrank:" + GetChatId(message)
 	reply, err := redis.Strings(redisClient.Do("ZREVRANGE", key, 0, 9, "WITHSCORES"))
 	var text string
 	if err == nil {
-		for i := 0; i < len(reply) - 1; i += 2 {
+		for i := 0; i < len(reply)-1; i += 2 {
 			text += reply[i] + " : " + reply[i+1] + "\n"
 		}
 	} else {
@@ -138,11 +138,11 @@ func TextRankHandler(message * tgbotapi.Message) {
 	bot.Send(msg)
 }
 
-func TextStudyHandler(message * tgbotapi.Message) {
+func TextStudyHandler(message *tgbotapi.Message) {
 	var text string
 
 	args := strings.Split(message.CommandArguments(), " ")
-	var args2 = make([]interface{}, len(args)+ 1)
+	var args2 = make([]interface{}, len(args)+1)
 	args2[0] = "textstudy"
 	for i, word := range args {
 		jieba.AddWord(word, "user")
@@ -162,20 +162,20 @@ func TextStudyHandler(message * tgbotapi.Message) {
 	bot.Send(msg)
 }
 
-func InfoHandler(message * tgbotapi.Message) {
+func InfoHandler(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "https://github.com/zwkno1/telegram_bot_go")
 	msg.ReplyToMessageID = message.MessageID
 	bot.Send(msg)
 }
 
-var bot * tgbotapi.BotAPI
+var bot *tgbotapi.BotAPI
 var redisClient redis.Conn
-var messageHandlerScript * redis.Script
-var rankScript * redis.Script
-var jieba * gojieba.Jieba
+var messageHandlerScript *redis.Script
+var rankScript *redis.Script
+var jieba *gojieba.Jieba
 
-func loadRedisScript(keyCount int, fileName string)( * redis.Script) {
-	var script * redis.Script
+func loadRedisScript(keyCount int, fileName string) *redis.Script {
+	var script *redis.Script
 	data, err := ioutil.ReadFile(fileName)
 	if err == nil {
 		script = redis.NewScript(keyCount, string(data))
@@ -186,17 +186,17 @@ func loadRedisScript(keyCount int, fileName string)( * redis.Script) {
 }
 
 func loadBotConfig(fileName string) (config BotConfig, err error) {
-	var file * os.File
+	var file *os.File
 	file, err = os.Open(fileName)
-    defer file.Close()
+	defer file.Close()
 	if err != nil {
 		return config, err
 	}
-    decoder := json.NewDecoder(file)
-    err = decoder.Decode(&config)
-    if err != nil {
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&config)
+	if err != nil {
 		return config, err
-    }
+	}
 	log.Println(config.Name)
 	return config, err
 }
@@ -221,7 +221,7 @@ func main() {
 
 	messageHandlerScript = loadRedisScript(4, "./message_handler.lua")
 	rankScript = loadRedisScript(1, "./rank.lua")
-	if (rankScript == nil) || (messageHandlerScript == nil){
+	if (rankScript == nil) || (messageHandlerScript == nil) {
 		log.Fatal("load redis script failed")
 	}
 
@@ -260,8 +260,8 @@ func main() {
 	for update := range updates {
 		log.Printf("%+v\n", update)
 		if update.Message != nil {
-			if update.Message.IsCommand(){
-				log.Println("comand: ", update.Message.Command(), "argument: ", update.Message.CommandArguments()) 
+			if update.Message.IsCommand() {
+				log.Println("comand: ", update.Message.Command(), "argument: ", update.Message.CommandArguments())
 			}
 			messageDispatcher.Dispatch(update.Message)
 		}

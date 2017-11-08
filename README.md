@@ -1,7 +1,9 @@
+## install depend package
+./install.sh
 
-##build
+## build
 go build *.go
 
-##run
+## run
 ./bot -c config.json
 

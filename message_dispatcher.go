@@ -1,20 +1,20 @@
 package main
 
 import (
-	"strings"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
+	"strings"
 )
 
-type HandlerFunc func(* tgbotapi.Message)
+type HandlerFunc func(*tgbotapi.Message)
 
-type MessageDispatcher struct{
-	handlers map[string] HandlerFunc
-	defaultHandler  HandlerFunc
+type MessageDispatcher struct {
+	handlers       map[string]HandlerFunc
+	defaultHandler HandlerFunc
 }
 
-func NewMessageDispatcher(defaultHandler HandlerFunc) *MessageDispatcher{
+func NewMessageDispatcher(defaultHandler HandlerFunc) *MessageDispatcher {
 	result := new(MessageDispatcher)
-	result.handlers = make(map[string] HandlerFunc)
+	result.handlers = make(map[string]HandlerFunc)
 	result.defaultHandler = defaultHandler
 	return result
 }
@@ -26,9 +26,9 @@ func (d *MessageDispatcher) Register(command string, handler HandlerFunc) {
 	d.handlers[command] = handler
 }
 
-func (d *MessageDispatcher) Dispatch(message * tgbotapi.Message) {
+func (d *MessageDispatcher) Dispatch(message *tgbotapi.Message) {
 	handler := d.defaultHandler
-	if message.IsCommand(){
+	if message.IsCommand() {
 		h, ok := d.handlers[message.Command()]
 		if ok {
 			handler = h
