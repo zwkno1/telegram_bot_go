@@ -1,0 +1,9 @@
+{
+	"name" : "webhookpath",
+	"token" : "bottoken",
+	"url" : "webhookurl",
+	"address" : "ip:port",
+	"cert" : "server cert",
+	"key" : "server key"
+}
+
