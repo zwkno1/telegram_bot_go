@@ -36,18 +36,18 @@ func SplitText(text string) []string {
 		for _, suffix := range allow {
 			if strings.HasSuffix(word, suffix) {
 				word = word[:len(word)-len(suffix)]
-				if len(word) > 1 {
+				if GetCharNum(word) > 1 {
 					result = append(result, word)
 				}
 			}
 		}
 	}
-	log.Println("-------------------------")
-	for _, word := range result {
-		log.Println(word)
-	}
-	log.Println("-------------------------")
+	log.Println("[keywords] ", result)
 	return result
+}
+
+func GetCharNum(text string)(int){
+	return len([]rune(text))
 }
 
 func GetChatId(message *tgbotapi.Message) string {
@@ -67,7 +67,7 @@ func MessageToString(message *tgbotapi.Message) (msg string) {
 }
 
 func DefaultMessageHandler(message *tgbotapi.Message) {
-	log.Printf("(text) %+v>> \t%+v\n", message.From.FirstName+" "+message.From.LastName, message.Text)
+	log.Println("(text)")
 	from := message.From
 	if (from != nil) && (message.Chat != nil) {
 		userId := strconv.Itoa(from.ID)
@@ -96,7 +96,7 @@ func DefaultMessageHandler(message *tgbotapi.Message) {
 }
 
 func RankHandler(message *tgbotapi.Message) {
-	log.Printf("(/rank) %+v>> \t%+v\n", message.From.FirstName+" "+message.From.LastName, message.Text)
+	log.Println("(rank)")
 	chatId := GetChatId(message)
 	reply, err := redis.Strings(rankScript.Do(redisClient, chatId))
 	var text string
@@ -118,6 +118,7 @@ func RankHandler(message *tgbotapi.Message) {
 }
 
 func TextRankHandler(message *tgbotapi.Message) {
+	log.Println("(textrank)")
 	key := "textrank:" + GetChatId(message)
 	reply, err := redis.Strings(redisClient.Do("ZREVRANGE", key, 0, 9, "WITHSCORES"))
 	var text string
@@ -139,6 +140,7 @@ func TextRankHandler(message *tgbotapi.Message) {
 }
 
 func TextStudyHandler(message *tgbotapi.Message) {
+	log.Println("(textstudy)")
 	var text string
 
 	args := strings.Split(message.CommandArguments(), " ")
@@ -163,6 +165,7 @@ func TextStudyHandler(message *tgbotapi.Message) {
 }
 
 func InfoHandler(message *tgbotapi.Message) {
+	log.Println("(info)")
 	msg := tgbotapi.NewMessage(message.Chat.ID, "https://github.com/zwkno1/telegram_bot_go")
 	msg.ReplyToMessageID = message.MessageID
 	bot.Send(msg)
@@ -201,6 +204,14 @@ func loadBotConfig(fileName string) (config BotConfig, err error) {
 	return config, err
 }
 
+func newRedisClient() (redis.Conn) {
+	client, err := redis.Dial("tcp", "127.0.0.1:6379", redis.DialDatabase(0), redis.DialConnectTimeout(time.Second*3))
+	if err != nil {
+		log.Println("[redis] ", err.Error())
+	}
+	return client
+}
+
 func main() {
 	var config BotConfig
 	var err error
@@ -214,9 +225,9 @@ func main() {
 	}
 
 	//init redis
-	redisClient, err = redis.Dial("tcp", "127.0.0.1:6379", redis.DialDatabase(0), redis.DialConnectTimeout(time.Second*3))
-	if err != nil {
-		log.Fatal(err)
+	redisClient = newRedisClient()
+	if redisClient.Err() != nil {
+		log.Fatal("[redis] init failed")
 	}
 
 	messageHandlerScript = loadRedisScript(4, "./message_handler.lua")
@@ -258,11 +269,19 @@ func main() {
 	messageDispatcher.Register("info", InfoHandler)
 
 	for update := range updates {
-		log.Printf("%+v\n", update)
+		msg := MessageToString(update.Message)
+		log.Println("[message] ", msg)
+
+		//check redis connection
+		if redisClient.Err() != nil {
+			log.Println("[redis] reconnect: ", redisClient.Err())
+			redisClient = newRedisClient()
+		}
+		if redisClient.Err() != nil {
+			log.Println("[redis] reconnect failed: ", redisClient.Err())
+		}
+
 		if update.Message != nil {
-			if update.Message.IsCommand() {
-				log.Println("comand: ", update.Message.Command(), "argument: ", update.Message.CommandArguments())
-			}
 			messageDispatcher.Dispatch(update.Message)
 		}
 	}
