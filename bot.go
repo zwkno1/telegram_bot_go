@@ -26,6 +26,7 @@ type BotConfig struct {
 	Address string
 	Cert    string
 	Key     string
+	Redis   string
 }
 
 func SplitText(text string) []string {
@@ -46,7 +47,7 @@ func SplitText(text string) []string {
 	return result
 }
 
-func GetCharNum(text string)(int){
+func GetCharNum(text string) int {
 	return len([]rune(text))
 }
 
@@ -75,13 +76,17 @@ func DefaultMessageHandler(message *tgbotapi.Message) {
 		chatId := GetChatId(message)
 		msg := MessageToString(message)
 		words := SplitText(message.Text)
-		args := make([]interface{}, len(words)+4)
+		args := make([]interface{}, len(words)+5)
 		args[0] = chatId
 		args[1] = userId
 		args[2] = msg
 		args[3] = userName
+		args[4] = "0"
+		if (message.ReplyToMessage != nil) && (message.ReplyToMessage.From != nil) {
+			args[4] = strconv.Itoa(message.ReplyToMessage.From.ID)
+		}
 		for i, d := range words {
-			args[i+4] = d
+			args[i+5] = d
 		}
 
 		reply, err := redis.String(messageHandlerScript.Do(redisClient, args...))
@@ -164,6 +169,25 @@ func TextStudyHandler(message *tgbotapi.Message) {
 	bot.Send(msg)
 }
 
+func RelationshipRankHandler(message *tgbotapi.Message) {
+	log.Println("(relationship)")
+	text := "搞基指数:\n"
+	key := strconv.Itoa(message.From.ID)
+	reply, err := redis.Strings(relationshipScript.Do(redisClient, key))
+	if err == nil {
+		for i := 0; i < len(reply)-1; i += 2 {
+			text += reply[i] + " : " + reply[i+1] + "\n"
+		}
+	} else {
+		log.Print(err)
+		text = defaultMessage
+	}
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, text)
+	msg.ReplyToMessageID = message.MessageID
+	bot.Send(msg)
+}
+
 func InfoHandler(message *tgbotapi.Message) {
 	log.Println("(info)")
 	msg := tgbotapi.NewMessage(message.Chat.ID, "https://github.com/zwkno1/telegram_bot_go")
@@ -175,6 +199,7 @@ var bot *tgbotapi.BotAPI
 var redisClient redis.Conn
 var messageHandlerScript *redis.Script
 var rankScript *redis.Script
+var relationshipScript *redis.Script
 var jieba *gojieba.Jieba
 
 func loadRedisScript(keyCount int, fileName string) *redis.Script {
@@ -204,8 +229,8 @@ func loadBotConfig(fileName string) (config BotConfig, err error) {
 	return config, err
 }
 
-func newRedisClient() (redis.Conn) {
-	client, err := redis.Dial("tcp", "127.0.0.1:6379", redis.DialDatabase(0), redis.DialConnectTimeout(time.Second*3))
+func newRedisClient(address string) redis.Conn {
+	client, err := redis.Dial("tcp", address, redis.DialDatabase(0), redis.DialConnectTimeout(time.Second*3))
 	if err != nil {
 		log.Println("[redis] ", err.Error())
 	}
@@ -225,14 +250,15 @@ func main() {
 	}
 
 	//init redis
-	redisClient = newRedisClient()
+	redisClient = newRedisClient(config.Redis)
 	if redisClient.Err() != nil {
 		log.Fatal("[redis] init failed")
 	}
 
-	messageHandlerScript = loadRedisScript(4, "./message_handler.lua")
+	messageHandlerScript = loadRedisScript(5, "./message_handler.lua")
 	rankScript = loadRedisScript(1, "./rank.lua")
-	if (rankScript == nil) || (messageHandlerScript == nil) {
+	relationshipScript = loadRedisScript(1, "./relationship.lua")
+	if (rankScript == nil) || (messageHandlerScript == nil) || (relationshipScript == nil) {
 		log.Fatal("load redis script failed")
 	}
 
@@ -266,6 +292,7 @@ func main() {
 	messageDispatcher.Register("rank", RankHandler)
 	messageDispatcher.Register("textrank", TextRankHandler)
 	messageDispatcher.Register("textstudy", TextStudyHandler)
+	messageDispatcher.Register("gayrank", RelationshipRankHandler)
 	messageDispatcher.Register("info", InfoHandler)
 
 	for update := range updates {
@@ -275,7 +302,7 @@ func main() {
 		//check redis connection
 		if redisClient.Err() != nil {
 			log.Println("[redis] reconnect: ", redisClient.Err())
-			redisClient = newRedisClient()
+			redisClient = newRedisClient(config.Redis)
 		}
 		if redisClient.Err() != nil {
 			log.Println("[redis] reconnect failed: ", redisClient.Err())
