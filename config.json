@@ -4,6 +4,7 @@
 	"url" : "webhookurl",
 	"address" : "ip:port",
 	"cert" : "server cert",
-	"key" : "server key"
+	"key" : "server key",
+	"redis" : "redis ip : redis port"
 }
 
