@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"regexp"
 )
 
 const (
@@ -47,6 +48,19 @@ func SplitText(text string) []string {
 	return result
 }
 
+func GetAtUsers(message *tgbotapi.Message) []string {
+	reg := regexp.MustCompile(`@[a-zA-Z0-9_]+[a-zA-Z0-9]`)
+	ret := reg.FindAll([]byte(message.Text), -1)
+	result := make([]string, 0, len(ret))
+	for _,s := range ret {
+		str := strings.TrimPrefix(string(s), "@")
+		if len(str) != 0 {
+			result = append(result, str)
+		}
+	}
+	return result
+}
+
 func GetCharNum(text string) int {
 	return len([]rune(text))
 }
@@ -72,7 +86,8 @@ func DefaultMessageHandler(message *tgbotapi.Message) {
 	from := message.From
 	if (from != nil) && (message.Chat != nil) {
 		userId := strconv.Itoa(from.ID)
-		userName := from.FirstName + " " + from.LastName
+		userName := from.UserName
+		nickName := from.FirstName + " " + from.LastName
 		chatId := GetChatId(message)
 		msg := MessageToString(message)
 		words := SplitText(message.Text)
@@ -81,10 +96,7 @@ func DefaultMessageHandler(message *tgbotapi.Message) {
 		args[1] = userId
 		args[2] = msg
 		args[3] = userName
-		args[4] = "0"
-		if (message.ReplyToMessage != nil) && (message.ReplyToMessage.From != nil) {
-			args[4] = strconv.Itoa(message.ReplyToMessage.From.ID)
-		}
+		args[4] = nickName
 		for i, d := range words {
 			args[i+5] = d
 		}
@@ -97,13 +109,37 @@ func DefaultMessageHandler(message *tgbotapi.Message) {
 		if reply != "ok" {
 			log.Printf("messageHandlerScript reply: %+v\n", reply)
 		}
+
+		// relationship
+		replyId := "0"
+		if (message.ReplyToMessage != nil) && (message.ReplyToMessage.From != nil) {
+			replyId = strconv.Itoa(message.ReplyToMessage.From.ID)
+		}
+		atUsers := GetAtUsers(message)
+		log.Printf("[at users] %+v\n", atUsers)
+		args2 := make([]interface{}, len(atUsers)+3)
+		args2[0] = chatId
+		args2[1] = userId
+		args2[2] = replyId
+		for i, d := range atUsers {
+			args2[i+3] = d
+		}
+
+		reply, err = redis.String(relationshipScript.Do(redisClient, args2...))
+		if err != nil {
+			log.Printf("%+v\n", err.Error())
+			return
+		}
+		if reply != "ok" {
+			log.Printf("relationshipScript reply: %+v\n", reply)
+		}
 	}
 }
 
 func RankHandler(message *tgbotapi.Message) {
 	log.Println("(rank)")
 	chatId := GetChatId(message)
-	reply, err := redis.Strings(rankScript.Do(redisClient, chatId))
+	reply, err := redis.Strings(rankScript.Do(redisClient, "rank", chatId))
 	var text string
 	if err == nil {
 		for i := 0; i < len(reply)-1; i += 2 {
@@ -169,11 +205,35 @@ func TextStudyHandler(message *tgbotapi.Message) {
 	bot.Send(msg)
 }
 
+func TextBanHandler(message *tgbotapi.Message) {
+	log.Println("(textban)")
+	var text string
+
+    args := strings.Split(message.CommandArguments(), " ")
+    var args2 = make([]interface{}, len(args)+1)
+    args2[0] = "banned_words"
+    for i, word := range args {
+        args2[i+1] = word
+    }
+
+    reply, err := redis.Int64(redisClient.Do("SADD", args2...))
+    if err != nil {
+        log.Println("text ban: ", err)
+        text = defaultMessage
+    } else {
+        text = "ban " + strconv.FormatInt(reply, 10) + " words"
+    }
+
+    msg := tgbotapi.NewMessage(message.Chat.ID, text)
+    msg.ReplyToMessageID = message.MessageID
+    bot.Send(msg)
+}
+
 func RelationshipRankHandler(message *tgbotapi.Message) {
 	log.Println("(relationship)")
-	text := "搞基指数:\n"
+	text := "最想和你搞基的人:\n"
 	key := strconv.Itoa(message.From.ID)
-	reply, err := redis.Strings(relationshipScript.Do(redisClient, key))
+	reply, err := redis.Strings(rankScript.Do(redisClient, "relationship", key))
 	if err == nil {
 		for i := 0; i < len(reply)-1; i += 2 {
 			text += reply[i] + " : " + reply[i+1] + "\n"
@@ -198,8 +258,8 @@ func InfoHandler(message *tgbotapi.Message) {
 var bot *tgbotapi.BotAPI
 var redisClient redis.Conn
 var messageHandlerScript *redis.Script
-var rankScript *redis.Script
 var relationshipScript *redis.Script
+var rankScript *redis.Script
 var jieba *gojieba.Jieba
 
 func loadRedisScript(keyCount int, fileName string) *redis.Script {
@@ -238,12 +298,25 @@ func newRedisClient(address string) redis.Conn {
 }
 
 func main() {
-	var config BotConfig
 	var err error
+	var config BotConfig
 	cfg := flag.String("c", "./config.json", "config file")
+	logPath := flag.String("l", "", "log file")
 	flag.Parse()
-	log.Println("load config file ", *cfg)
 
+	//init log 
+	var logFile * os.File
+	if len(*logPath) != 0 {
+		logFile, err = os.OpenFile(*logPath, os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.SetOutput(logFile)
+	}
+	defer logFile.Close()
+
+	//load config
+	log.Println("load config file ", *cfg)
 	config, err = loadBotConfig(*cfg)
 	if err != nil {
 		log.Fatal(err)
@@ -256,8 +329,8 @@ func main() {
 	}
 
 	messageHandlerScript = loadRedisScript(5, "./message_handler.lua")
-	rankScript = loadRedisScript(1, "./rank.lua")
-	relationshipScript = loadRedisScript(1, "./relationship.lua")
+	relationshipScript = loadRedisScript(3, "./relationship.lua")
+	rankScript = loadRedisScript(2, "./rank.lua")
 	if (rankScript == nil) || (messageHandlerScript == nil) || (relationshipScript == nil) {
 		log.Fatal("load redis script failed")
 	}
@@ -292,10 +365,14 @@ func main() {
 	messageDispatcher.Register("rank", RankHandler)
 	messageDispatcher.Register("textrank", TextRankHandler)
 	messageDispatcher.Register("textstudy", TextStudyHandler)
+	messageDispatcher.Register("textban", TextBanHandler)
 	messageDispatcher.Register("gayrank", RelationshipRankHandler)
 	messageDispatcher.Register("info", InfoHandler)
 
 	for update := range updates {
+		if update.Message == nil {
+			continue
+		}
 		msg := MessageToString(update.Message)
 		log.Println("[message] ", msg)
 
@@ -304,12 +381,11 @@ func main() {
 			log.Println("[redis] reconnect: ", redisClient.Err())
 			redisClient = newRedisClient(config.Redis)
 		}
+
 		if redisClient.Err() != nil {
 			log.Println("[redis] reconnect failed: ", redisClient.Err())
 		}
 
-		if update.Message != nil {
-			messageDispatcher.Dispatch(update.Message)
-		}
+		messageDispatcher.Dispatch(update.Message)
 	}
 }

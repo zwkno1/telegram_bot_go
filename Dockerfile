@@ -19,5 +19,5 @@ ADD relationship.lua /usr/local/bot
 
 RUN cd /usr/local/bot && go build -o bot bot.go message_dispatcher.go 
 
-ENTRYPOINT [ "/usr/local/bot/bot", "-c", "/data/config.json" ]
+ENTRYPOINT [ "/usr/local/bot/bot", "-c", "/data/config.json", "-l", "/data/bot.log" ]
 
