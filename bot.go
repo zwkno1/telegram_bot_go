@@ -353,13 +353,25 @@ func main() {
 	}
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	_, err = bot.SetWebhook(tgbotapi.NewWebhook(config.Url + config.Name))
-	if err != nil {
-		log.Fatal(err)
-	}
+	var updates tgbotapi.UpdatesChannel
+	var uc tgbotapi.UpdateConfig 
 
-	updates := bot.ListenForWebhook("/" + config.Name)
-	go http.ListenAndServeTLS(config.Address, config.Cert, config.Key, nil)
+	if len(config.Url) != 0 {
+		_, err = bot.SetWebhook(tgbotapi.NewWebhook(config.Url + config.Name))
+		if err != nil {
+			log.Fatal(err)
+		}
+		updates = bot.ListenForWebhook("/" + config.Name)
+		go http.ListenAndServeTLS(config.Address, config.Cert, config.Key, nil)
+	} else {
+		_, err = bot.RemoveWebhook()
+		uc = tgbotapi.NewUpdate(0)
+		uc.Timeout = 60
+		updates, err = bot.GetUpdatesChan(uc)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	messageDispatcher := NewMessageDispatcher(DefaultMessageHandler)
 	messageDispatcher.Register("rank", RankHandler)
